@@ -1,18 +1,16 @@
-[tool.poetry]
+[project]
 name = "app"
 version = "0.1.0"
-description = ""
-authors = ["Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>"]
+description = "Ideation backend API"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.12"
-fastapi = {extras = ["standard"], version = "^0.121.1"}
-psycopg = {extras = ["binary"], version = "^3.2.12"}
-openai = "^2.7.2"
-python-dotenv = "^1.2.1"
-
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.121.1",
+    "psycopg[binary]>=3.2.12",
+    "openai>=2.7.2",
+    "python-dotenv>=1.2.1",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

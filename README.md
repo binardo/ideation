@@ -18,7 +18,7 @@ A comprehensive web application for AI-powered ideation that guides users throug
 ### Backend (FastAPI)
 - **Location**: `ideation-backend/`
 - **Framework**: FastAPI with Python 3.12
-- **Dependencies**: OpenAI API, Poetry for package management
+- **Dependencies**: OpenAI API, UV for package management
 - **API Endpoints**:
   - `/api/start-session` - Initialize ideation session with clarifying questions
   - `/api/submit-answers` - Generate problem statements from answers
@@ -42,7 +42,7 @@ A comprehensive web application for AI-powered ideation that guides users throug
 ### Prerequisites
 - Python 3.12+
 - Node.js 18+
-- Poetry (for Python dependency management)
+- UV (for Python dependency management) - Install from https://docs.astral.sh/uv/
 - OpenAI API key
 
 ### Backend Setup
@@ -59,12 +59,12 @@ echo "OPENAI_API_KEY=your_api_key_here" > .env
 
 3. Install dependencies:
 ```bash
-poetry install
+uv sync
 ```
 
 4. Start the development server:
 ```bash
-poetry run fastapi dev app/main.py
+uv run fastapi dev app/main.py
 ```
 
 The backend will be available at `http://localhost:8000`
@@ -164,7 +164,7 @@ ideation/
 │   ├── app/
 │   │   └── main.py          # FastAPI application with all endpoints
 │   ├── pyproject.toml        # Python dependencies
-│   ├── poetry.lock
+│   ├── uv.lock              # UV lock file
 │   └── .env                  # Environment variables (create this)
 │
 └── ideation-frontend/
