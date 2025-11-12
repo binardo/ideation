@@ -6,6 +6,7 @@ import os
 from openai import OpenAI
 import asyncio
 from dotenv import load_dotenv
+import uuid
 
 load_dotenv()
 
@@ -21,8 +22,10 @@ app.add_middleware(
 )
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 sessions = {}
+session_locks = {}
 
 class ProblemInput(BaseModel):
     problem: str
@@ -57,7 +60,7 @@ async def start_session(input: ProblemInput):
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=MODEL,
             messages=[
                 {"role": "system", "content": "You are an expert at helping people clarify their problems. Ask 3-5 insightful clarifying questions that will help understand the problem better and guide the ideation process. Be specific and thoughtful."},
                 {"role": "user", "content": f"The user described their problem as: {input.problem}\n\nGenerate 3-5 clarifying questions to better understand their needs, constraints, target audience, and goals."}
@@ -75,8 +78,12 @@ async def start_session(input: ProblemInput):
             "selected_problem_statement": None,
             "ideas": [],
             "novel_ideas": [],
-            "duplicate_ideas": []
+            "duplicate_ideas": [],
+            "generation_active": False,
+            "inflight": 0,
+            "generation_task": None
         }
+        session_locks[session_id] = asyncio.Lock()
         
         return {
             "session_id": session_id,
@@ -96,7 +103,7 @@ async def submit_answers(input: ClarifyingAnswers):
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=MODEL,
             messages=[
                 {"role": "system", "content": "You are an expert at formulating clear, actionable problem statements. Generate 4 distinct, well-specified problem statements that are open-ended and inspire creative solutions. Each should be 2-3 lines."},
                 {"role": "user", "content": f"Initial problem: {session['initial_problem']}\n\nClarifying questions: {session['clarifying_questions']}\n\nUser's answers: {input.answers}\n\nGenerate 4 distinct problem statements (2-3 lines each) that capture different angles or aspects of this problem. Format each as a clear, open-ended statement that invites creative solutions."}
@@ -137,6 +144,172 @@ async def submit_answers(input: ClarifyingAnswers):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+async def run_generation(session_id: str):
+    """Background task to generate ideas concurrently"""
+    if session_id not in sessions:
+        return
+    
+    session = sessions[session_id]
+    lock = session_locks[session_id]
+    
+    try:
+        prompt_index = 0
+        max_concurrent = 5
+        
+        while session.get("generation_active", False):
+            tasks = []
+            for i in range(max_concurrent):
+                include_existing = (prompt_index % 2 == 0)
+                variation = prompt_index % 5
+                tasks.append(generate_single_idea_background(session_id, include_existing, variation, lock))
+                prompt_index += 1
+            
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            async with lock:
+                total_ideas = len(session["ideas"])
+                duplicate_count = len(session["duplicate_ideas"])
+                
+                if total_ideas > 10:
+                    duplicate_percentage = (duplicate_count / total_ideas) * 100
+                    if duplicate_percentage >= 75:
+                        session["generation_active"] = False
+                        break
+            
+            await asyncio.sleep(0.5)
+    except Exception as e:
+        print(f"Error in generation task: {e}")
+    finally:
+        async with lock:
+            session["generation_active"] = False
+
+async def generate_single_idea_background(session_id: str, include_existing: bool, variation: int, lock: asyncio.Lock):
+    """Generate a single idea in the background"""
+    try:
+        session = sessions[session_id]
+        
+        async with lock:
+            session["inflight"] = session.get("inflight", 0) + 1
+        
+        problem_statement = session["selected_problem_statement"]
+        
+        prompts = [
+            "Generate a creative and novel solution to this problem. Think outside the box.",
+            "Approach this problem from a completely different angle. What's an unconventional solution?",
+            "Think about how technology could solve this problem in an innovative way.",
+            "Consider a simple, elegant solution that others might overlook.",
+            "What would a radical, disruptive solution look like for this problem?"
+        ]
+        
+        base_prompt = prompts[variation % len(prompts)]
+        
+        existing_ideas_text = ""
+        if include_existing:
+            async with lock:
+                if session["novel_ideas"]:
+                    ideas_list = [f"- {idea['title']}: {idea['description']}" for idea in session["novel_ideas"][:10]]
+                    existing_ideas_text = f"\n\nExisting ideas (generate something DIFFERENT from these):\n" + "\n".join(ideas_list)
+        
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": f"You are a creative ideation expert. {base_prompt} Provide your response in this exact format:\nTitle: [Short catchy title]\nDescription: [2-3 lines describing how the idea would work]"},
+                {"role": "user", "content": f"Problem statement: {problem_statement}{existing_ideas_text}\n\nGenerate ONE novel idea."}
+            ],
+            temperature=0.9
+        )
+        
+        idea_text = response.choices[0].message.content.strip()
+        
+        lines = idea_text.split('\n')
+        title = ""
+        description = ""
+        
+        for line in lines:
+            if line.startswith("Title:"):
+                title = line.replace("Title:", "").strip()
+            elif line.startswith("Description:"):
+                description = line.replace("Description:", "").strip()
+            elif description and line.strip():
+                description += " " + line.strip()
+        
+        if not title:
+            title = idea_text.split('\n')[0][:50]
+        if not description:
+            description = idea_text
+        
+        idea_id = str(uuid.uuid4())
+        idea = {
+            "id": idea_id,
+            "title": title,
+            "description": description,
+            "full_text": idea_text
+        }
+        
+        async with lock:
+            session["ideas"].append(idea)
+        
+        await check_uniqueness_background(session_id, idea_id, lock)
+        
+    except Exception as e:
+        print(f"Error generating idea: {e}")
+    finally:
+        async with lock:
+            session["inflight"] = max(0, session.get("inflight", 1) - 1)
+
+async def check_uniqueness_background(session_id: str, idea_id: str, lock: asyncio.Lock):
+    """Check if an idea is unique in the background"""
+    try:
+        session = sessions[session_id]
+        
+        async with lock:
+            idea = next((i for i in session["ideas"] if i["id"] == idea_id), None)
+            if not idea:
+                return
+            
+            if not session["novel_ideas"]:
+                session["novel_ideas"].append(idea)
+                return
+            
+            existing_ideas_text = "\n".join([
+                f"{i+1}. {idea['title']}: {idea['description']}" 
+                for i, idea in enumerate(session["novel_ideas"])
+            ])
+        
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": "You are an expert at comparing ideas. Determine if a new idea is substantially different from existing ideas or if it's very similar to one of them. Respond with 'UNIQUE' if it's different, or 'SIMILAR: [number]' if it's very similar to one of the existing ideas (provide the number)."},
+                {"role": "user", "content": f"Existing ideas:\n{existing_ideas_text}\n\nNew idea:\n{idea['title']}: {idea['description']}\n\nIs this new idea unique or similar to an existing one?"}
+            ],
+            temperature=0.3
+        )
+        
+        result = response.choices[0].message.content.strip().upper()
+        
+        async with lock:
+            if "UNIQUE" in result:
+                session["novel_ideas"].append(idea)
+            else:
+                similar_idx = None
+                for word in result.split():
+                    if word.isdigit():
+                        similar_idx = int(word) - 1
+                        break
+                
+                if similar_idx is not None and 0 <= similar_idx < len(session["novel_ideas"]):
+                    similar_idea = session["novel_ideas"][similar_idx]
+                    session["duplicate_ideas"].append({
+                        "idea": idea,
+                        "similar_to": similar_idea["id"]
+                    })
+                else:
+                    session["novel_ideas"].append(idea)
+    except Exception as e:
+        print(f"Error checking uniqueness: {e}")
+        async with lock:
+            session["novel_ideas"].append(idea)
+
 @app.post("/api/select-problem-statement")
 async def select_problem_statement(input: ProblemStatementSelection):
     """Select a problem statement and start idea generation"""
@@ -148,6 +321,11 @@ async def select_problem_statement(input: ProblemStatementSelection):
     session["ideas"] = []
     session["novel_ideas"] = []
     session["duplicate_ideas"] = []
+    session["generation_active"] = True
+    session["inflight"] = 0
+    
+    task = asyncio.create_task(run_generation(input.session_id))
+    session["generation_task"] = task
     
     return {"status": "ready", "problem_statement": input.problem_statement}
 
@@ -177,7 +355,7 @@ async def generate_idea(session_id: str, include_existing: bool = False, prompt_
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=MODEL,
             messages=[
                 {"role": "system", "content": f"You are a creative ideation expert. {base_prompt} Provide your response in this exact format:\nTitle: [Short catchy title]\nDescription: [2-3 lines describing how the idea would work]"},
                 {"role": "user", "content": f"Problem statement: {problem_statement}{existing_ideas_text}\n\nGenerate ONE novel idea."}
@@ -240,7 +418,7 @@ async def check_uniqueness(session_id: str, idea_id: str):
         ])
         
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=MODEL,
             messages=[
                 {"role": "system", "content": "You are an expert at comparing ideas. Determine if a new idea is substantially different from existing ideas or if it's very similar to one of them. Respond with 'UNIQUE' if it's different, or 'SIMILAR: [number]' if it's very similar to one of the existing ideas (provide the number)."},
                 {"role": "user", "content": f"Existing ideas:\n{existing_ideas_text}\n\nNew idea:\n{idea['title']}: {idea['description']}\n\nIs this new idea unique or similar to an existing one?"}
@@ -281,12 +459,24 @@ async def get_session_status(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     
     session = sessions[session_id]
+    lock = session_locks.get(session_id)
     
-    total_ideas = len(session["ideas"])
-    novel_count = len(session["novel_ideas"])
-    duplicate_count = len(session["duplicate_ideas"])
+    if lock:
+        async with lock:
+            total_ideas = len(session["ideas"])
+            novel_count = len(session["novel_ideas"])
+            duplicate_count = len(session["duplicate_ideas"])
+            inflight = session.get("inflight", 0)
+            generation_active = session.get("generation_active", False)
+    else:
+        total_ideas = len(session["ideas"])
+        novel_count = len(session["novel_ideas"])
+        duplicate_count = len(session["duplicate_ideas"])
+        inflight = session.get("inflight", 0)
+        generation_active = session.get("generation_active", False)
     
     should_stop = False
+    duplicate_percentage = 0
     if total_ideas > 10:
         duplicate_percentage = (duplicate_count / total_ideas) * 100
         should_stop = duplicate_percentage >= 75
@@ -296,6 +486,9 @@ async def get_session_status(session_id: str):
         "novel_ideas": novel_count,
         "duplicate_ideas": duplicate_count,
         "should_stop": should_stop,
+        "inflight": inflight,
+        "generation_active": generation_active,
+        "duplicate_percentage": duplicate_percentage,
         "novel_ideas_list": session["novel_ideas"],
         "duplicate_ideas_list": session["duplicate_ideas"]
     }
@@ -393,7 +586,7 @@ async def generate_prototypes(input: PrototypeRequest):
         
         try:
             specs_response = client.chat.completions.create(
-                model="gpt-4o",
+                model=MODEL,
                 messages=[
                     {"role": "system", "content": "You are an expert product designer. Generate 3 distinct app specifications for implementing this idea. Each spec should describe a different approach to the user interface and interaction model. Be specific about features and user flow."},
                     {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nGenerate 3 distinct app specifications, each with a different UI/UX approach."}
@@ -418,7 +611,7 @@ async def generate_prototypes(input: PrototypeRequest):
             idea_prototypes = []
             for i, spec in enumerate(specs[:3]):
                 html_response = client.chat.completions.create(
-                    model="gpt-4o",
+                    model=MODEL,
                     messages=[
                         {"role": "system", "content": "You are an expert web developer. Create a complete, interactive single-page HTML application with inline CSS and JavaScript. Use modern, clean design with dummy data. Make it fully functional and interactive. Include multiple UI pages/views within the single HTML file using JavaScript to show/hide sections. Use Tailwind CSS via CDN for styling."},
                         {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nApp Specification:\n{spec}\n\nCreate a complete, interactive HTML application that demonstrates this idea with dummy data and multiple views/pages. Make it visually appealing and fully functional."}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,7 +46,7 @@ function App() {
   const [selectedStatement, setSelectedStatement] = useState('')
   const [editingStatement, setEditingStatement] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
-  const [ideationProgress, setIdeationProgress] = useState({ total: 0, novel: 0, duplicates: 0 })
+  const [ideationProgress, setIdeationProgress] = useState({ total: 0, novel: 0, duplicates: 0, inflight: 0, generation_active: false })
   const [novelIdeas, setNovelIdeas] = useState<Idea[]>([])
   const [duplicateIdeas, setDuplicateIdeas] = useState<DuplicateIdea[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
@@ -55,6 +55,7 @@ function App() {
   const [prototypes, setPrototypes] = useState<Prototype[]>([])
   const [generatingPrototypes, setGeneratingPrototypes] = useState(false)
   const [viewingPrototype, setViewingPrototype] = useState<{ ideaId: string, prototypeIdx: number } | null>(null)
+  const generatingRef = useRef(false)
 
   const stages: Stage[] = ['problem', 'clarifying', 'statements', 'ideation', 'ideas', 'prototypes']
   const stageNames = {
@@ -123,6 +124,7 @@ function App() {
   }
 
   const startIdeaGeneration = async () => {
+    generatingRef.current = true
     setIsGenerating(true)
     let generationCount = 0
     const maxConcurrent = 5
@@ -137,12 +139,13 @@ function App() {
       await Promise.all(promises)
     }
 
-    while (isGenerating) {
+    while (generatingRef.current) {
       await generateBatch()
       await new Promise(resolve => setTimeout(resolve, 1000))
       
       const status = await checkStatus()
       if (status.should_stop || status.novel_ideas >= targetIdeas) {
+        generatingRef.current = false
         setIsGenerating(false)
         setStage('ideas')
         break
@@ -177,7 +180,9 @@ function App() {
       setIdeationProgress({
         total: data.total_ideas,
         novel: data.novel_ideas,
-        duplicates: data.duplicate_ideas
+        duplicates: data.duplicate_ideas,
+        inflight: data.inflight || 0,
+        generation_active: data.generation_active || false
       })
       setNovelIdeas(data.novel_ideas_list)
       setDuplicateIdeas(data.duplicate_ideas_list)
@@ -472,6 +477,15 @@ function App() {
                           value={((ideationProgress.total - ideationProgress.duplicates) / ideationProgress.total) * 100}
                           className="h-2 bg-blue-100"
                         />
+                      </div>
+                    )}
+
+                    {ideationProgress.generation_active && (
+                      <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="font-medium text-purple-700">Calls in Progress</span>
+                          <span className="text-purple-600 font-bold">{ideationProgress.inflight}</span>
+                        </div>
                       </div>
                     )}
                   </div>
