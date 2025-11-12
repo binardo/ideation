@@ -15,7 +15,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+ideation-backend/lib/
 lib64/
 parts/
 sdist/
