@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import './App.css'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,13 +51,12 @@ function App() {
   const [ideationProgress, setIdeationProgress] = useState({ total: 0, novel: 0, duplicates: 0, inflight: 0, generation_active: false })
   const [novelIdeas, setNovelIdeas] = useState<Idea[]>([])
   const [duplicateIdeas, setDuplicateIdeas] = useState<DuplicateIdea[]>([])
-  const [isGenerating, setIsGenerating] = useState(false)
+  const [_isGenerating, setIsGenerating] = useState(false)
   const [showSimilarIdeas, setShowSimilarIdeas] = useState<string | null>(null)
   const [showGenerateMore, setShowGenerateMore] = useState(false)
   const [prototypes, setPrototypes] = useState<Prototype[]>([])
   const [generatingPrototypes, setGeneratingPrototypes] = useState(false)
   const [viewingPrototype, setViewingPrototype] = useState<{ ideaId: string, prototypeIdx: number } | null>(null)
-  const generatingRef = useRef(false)
   const [selectedPersona, setSelectedPersona] = useState('')
   const [customPersona, setCustomPersona] = useState('')
   const [constraints, setConstraints] = useState<string[]>([])
@@ -127,56 +126,6 @@ function App() {
     } catch (error) {
       console.error('Error selecting statement:', error)
       setLoading(false)
-    }
-  }
-
-  const startIdeaGeneration = async () => {
-    generatingRef.current = true
-    setIsGenerating(true)
-    let generationCount = 0
-    const maxConcurrent = 5
-    const targetIdeas = 15
-
-    const generateBatch = async () => {
-      const promises = []
-      for (let i = 0; i < maxConcurrent; i++) {
-        promises.push(generateSingleIdea(generationCount % 2 === 0, generationCount % 5))
-        generationCount++
-      }
-      await Promise.all(promises)
-    }
-
-    while (generatingRef.current) {
-      await generateBatch()
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const status = await checkStatus()
-      if (status.should_stop || status.novel_ideas >= targetIdeas) {
-        generatingRef.current = false
-        setIsGenerating(false)
-        setStage('ideas')
-        break
-      }
-    }
-  }
-
-  const generateSingleIdea = async (includeExisting: boolean, variation: number) => {
-    try {
-      const response = await fetch(
-        `${API_URL}/api/generate-idea?session_id=${sessionId}&include_existing=${includeExisting}&prompt_variation=${variation}`,
-        { method: 'POST' }
-      )
-      const idea = await response.json()
-      
-      const uniqueResponse = await fetch(
-        `${API_URL}/api/check-uniqueness?session_id=${sessionId}&idea_id=${idea.id}`,
-        { method: 'POST' }
-      )
-      await uniqueResponse.json()
-      
-      await checkStatus()
-    } catch (error) {
-      console.error('Error generating idea:', error)
     }
   }
 
