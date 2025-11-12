@@ -8,7 +8,9 @@ import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { Badge } from '@/components/ui/badge'
-import { Lightbulb, Heart, Trash2, Plus, Sparkles, ArrowLeft, ArrowRight, Code } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { Lightbulb, Heart, Trash2, Plus, Sparkles, ArrowLeft, ArrowRight, Code, X } from 'lucide-react'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -56,6 +58,10 @@ function App() {
   const [generatingPrototypes, setGeneratingPrototypes] = useState(false)
   const [viewingPrototype, setViewingPrototype] = useState<{ ideaId: string, prototypeIdx: number } | null>(null)
   const generatingRef = useRef(false)
+  const [selectedPersona, setSelectedPersona] = useState('')
+  const [customPersona, setCustomPersona] = useState('')
+  const [constraints, setConstraints] = useState<string[]>([])
+  const [selectedConstraint, setSelectedConstraint] = useState('')
 
   const stages: Stage[] = ['problem', 'clarifying', 'statements', 'ideation', 'ideas', 'prototypes']
   const stageNames = {
@@ -116,7 +122,8 @@ function App() {
         body: JSON.stringify({ session_id: sessionId, problem_statement: statement })
       })
       setStage('ideation')
-      startIdeaGeneration()
+      setIsGenerating(true)
+      await checkStatus()
     } catch (error) {
       console.error('Error selecting statement:', error)
       setLoading(false)
@@ -186,6 +193,12 @@ function App() {
       })
       setNovelIdeas(data.novel_ideas_list)
       setDuplicateIdeas(data.duplicate_ideas_list)
+      
+      if (stage === 'ideation' && !data.generation_active && data.novel_ideas > 0) {
+        setIsGenerating(false)
+        setStage('ideas')
+      }
+      
       return data
     } catch (error) {
       console.error('Error checking status:', error)
@@ -502,7 +515,7 @@ function App() {
             <div className="animate-in fade-in duration-500">
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-3xl font-bold mb-2">Your Novel Ideas</h2>
+                  <h2 className="text-3xl font-bold mb-2">Ideas</h2>
                   <p className="text-gray-600">
                     {novelIdeas.filter(i => i.liked).length} selected • {novelIdeas.length} total ideas
                   </p>
@@ -527,7 +540,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {novelIdeas.map((idea) => (
                   <Card
                     key={idea.id}
@@ -535,25 +548,36 @@ function App() {
                       idea.liked ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:border-purple-200'
                     }`}
                   >
-                    <CardContent className="pt-6">
-                      <div className="flex justify-between items-start mb-3">
-                        <Lightbulb className={`w-5 h-5 ${idea.liked ? 'text-purple-600' : 'text-gray-400'}`} />
-                        <div className="flex gap-1">
+                    <CardContent className="pt-4">
+                      <div className="flex justify-between items-center mb-3">
+                        <div className="flex items-center gap-2">
+                          <Lightbulb className={`w-4 h-4 ${idea.liked ? 'text-purple-600' : 'text-gray-400'}`} />
+                          {getSimilarIdeas(idea.id).length > 0 && (
+                            <Badge 
+                              variant="outline" 
+                              className="text-xs px-1.5 py-0 h-5 cursor-pointer hover:bg-gray-100"
+                              onClick={() => setShowSimilarIdeas(idea.id)}
+                            >
+                              {getSimilarIdeas(idea.id).length} similar
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex gap-0.5">
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => likeIdea(idea.id)}
-                            className={idea.liked ? 'text-red-500 hover:text-red-600' : 'text-gray-400 hover:text-red-500'}
+                            className={`h-7 w-7 p-0 ${idea.liked ? 'text-red-500 hover:text-red-600' : 'text-gray-400 hover:text-red-500'}`}
                           >
-                            <Heart className={`w-4 h-4 ${idea.liked ? 'fill-current' : ''}`} />
+                            <Heart className={`w-3.5 h-3.5 ${idea.liked ? 'fill-current' : ''}`} />
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => deleteIdea(idea.id)}
-                            className="text-gray-400 hover:text-red-500"
+                            className="text-gray-400 hover:text-red-500 h-7 w-7 p-0"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </div>
                       </div>
@@ -561,25 +585,14 @@ function App() {
                       <Input
                         value={idea.title}
                         onChange={(e) => updateIdea(idea.id, e.target.value, idea.description)}
-                        className="font-semibold mb-2 border-0 px-0 focus-visible:ring-0"
+                        className="font-semibold text-base mb-3 border-0 px-0 focus-visible:ring-0"
                       />
                       
                       <Textarea
                         value={idea.description}
                         onChange={(e) => updateIdea(idea.id, idea.title, e.target.value)}
-                        className="text-sm text-gray-600 min-h-20 border-0 px-0 focus-visible:ring-0"
+                        className="text-base text-gray-700 min-h-32 border-0 px-0 focus-visible:ring-0 resize-none"
                       />
-
-                      {getSimilarIdeas(idea.id).length > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setShowSimilarIdeas(idea.id)}
-                          className="mt-2 w-full text-xs"
-                        >
-                          View {getSimilarIdeas(idea.id).length} Similar Ideas
-                        </Button>
-                      )}
                     </CardContent>
                   </Card>
                 ))}
@@ -692,55 +705,85 @@ function App() {
       </Dialog>
 
       <Dialog open={showGenerateMore} onOpenChange={setShowGenerateMore}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Generate More Ideas</DialogTitle>
             <DialogDescription>
-              Choose an approach to generate additional ideas
+              Customize the ideation approach
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Persona Perspective</Label>
+              <Select value={selectedPersona} onValueChange={setSelectedPersona}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a persona..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="visionary">Visionary Tech Leader (Elon Musk style)</SelectItem>
+                  <SelectItem value="influencer">Social Media Influencer (Kim Kardashian style)</SelectItem>
+                  <SelectItem value="scientist">Brilliant Scientist (Einstein style)</SelectItem>
+                  <SelectItem value="investor">Strategic Investor (Warren Buffett style)</SelectItem>
+                  <SelectItem value="custom">Custom Persona</SelectItem>
+                </SelectContent>
+              </Select>
+              {selectedPersona === 'custom' && (
+                <Input
+                  placeholder="Describe the persona..."
+                  value={customPersona}
+                  onChange={(e) => setCustomPersona(e.target.value)}
+                  className="mt-2"
+                />
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Constraints</Label>
+              <Select value={selectedConstraint} onValueChange={(value) => {
+                if (value && !constraints.includes(value)) {
+                  setConstraints([...constraints, value])
+                  setSelectedConstraint('')
+                }
+              }}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Add a constraint..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="budget">Limited Budget</SelectItem>
+                  <SelectItem value="time">Time Constraint</SelectItem>
+                  <SelectItem value="tech">Existing Technology Only</SelectItem>
+                  <SelectItem value="simple">Must Be Simple</SelectItem>
+                  <SelectItem value="scalable">Must Be Highly Scalable</SelectItem>
+                  <SelectItem value="privacy">Privacy-Focused</SelectItem>
+                  <SelectItem value="sustainable">Environmentally Sustainable</SelectItem>
+                </SelectContent>
+              </Select>
+              {constraints.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {constraints.map((constraint, idx) => (
+                    <Badge key={idx} variant="secondary" className="gap-1">
+                      {constraint}
+                      <X 
+                        className="w-3 h-3 cursor-pointer" 
+                        onClick={() => setConstraints(constraints.filter((_, i) => i !== idx))}
+                      />
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <Button
-              variant="outline"
-              className="w-full justify-start h-auto py-4"
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
               onClick={() => {
                 setShowGenerateMore(false)
                 setStage('ideation')
-                startIdeaGeneration()
+                setIsGenerating(true)
+                checkStatus()
               }}
             >
-              <div className="text-left">
-                <p className="font-semibold">Different Persona</p>
-                <p className="text-sm text-gray-600">Generate ideas from a different perspective</p>
-              </div>
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start h-auto py-4"
-              onClick={() => {
-                setShowGenerateMore(false)
-                setStage('ideation')
-                startIdeaGeneration()
-              }}
-            >
-              <div className="text-left">
-                <p className="font-semibold">Remove Constraints</p>
-                <p className="text-sm text-gray-600">Think bigger without limitations</p>
-              </div>
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start h-auto py-4"
-              onClick={() => {
-                setShowGenerateMore(false)
-                setStage('ideation')
-                startIdeaGeneration()
-              }}
-            >
-              <div className="text-left">
-                <p className="font-semibold">Add Constraints</p>
-                <p className="text-sm text-gray-600">Focus on specific limitations</p>
-              </div>
+              <Sparkles className="w-4 h-4 mr-2" />
+              Generate Ideas
             </Button>
           </div>
         </DialogContent>

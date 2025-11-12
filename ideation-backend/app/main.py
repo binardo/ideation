@@ -62,8 +62,8 @@ async def start_session(input: ProblemInput):
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": "You are an expert at helping people clarify their problems. Ask 3-5 insightful clarifying questions that will help understand the problem better and guide the ideation process. Be specific and thoughtful."},
-                {"role": "user", "content": f"The user described their problem as: {input.problem}\n\nGenerate 3-5 clarifying questions to better understand their needs, constraints, target audience, and goals."}
+                {"role": "system", "content": "You are an innovation specialist helping a team work on a problem. Your role is to help them reframe and analyze their problem, which can shift their focus, enable them to view the problem from different angles, and encourage creative thinking. Ask 3-5 insightful clarifying questions that will help understand the problem better, identify stakeholders, current approaches, goals, resources, and constraints."},
+                {"role": "user", "content": f"The user described their problem as: {input.problem}\n\nAsk 3-5 follow-up questions to better understand:\n- The specific topic or challenge\n- Key stakeholders or audience affected\n- Current approaches and their limitations\n- Goals and desired outcomes\n- Resources and constraints"}
             ],
             temperature=0.7
         )
@@ -105,8 +105,8 @@ async def submit_answers(input: ClarifyingAnswers):
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": "You are an expert at formulating clear, actionable problem statements. Generate 4 distinct, well-specified problem statements that are open-ended and inspire creative solutions. Each should be 2-3 lines."},
-                {"role": "user", "content": f"Initial problem: {session['initial_problem']}\n\nClarifying questions: {session['clarifying_questions']}\n\nUser's answers: {input.answers}\n\nGenerate 4 distinct problem statements (2-3 lines each) that capture different angles or aspects of this problem. Format each as a clear, open-ended statement that invites creative solutions."}
+                {"role": "system", "content": "You are an expert at reframing problems to enable creative thinking. Generate 4 distinct problem statements that focus on real results, not particular methods. Frame them as quick, punchy, open-ended questions starting with 'How might we' or 'How can we'. Each should be 2-3 lines that inspire creative solutions from different angles."},
+                {"role": "user", "content": f"Initial problem: {session['initial_problem']}\n\nClarifying questions: {session['clarifying_questions']}\n\nUser's answers: {input.answers}\n\nGenerate 4 distinct 'How might we' or 'How can we' questions (2-3 lines each) that reframe this problem from different perspectives. Focus on the real end goal, not specific methods. Make them open-ended to encourage diverse solutions."}
             ],
             temperature=0.8
         )
@@ -168,13 +168,20 @@ async def run_generation(session_id: str):
             
             async with lock:
                 total_ideas = len(session["ideas"])
+                novel_count = len(session["novel_ideas"])
                 duplicate_count = len(session["duplicate_ideas"])
                 
-                if total_ideas > 10:
+                should_stop = False
+                if novel_count >= 15:
+                    should_stop = True
+                elif total_ideas >= 20:
                     duplicate_percentage = (duplicate_count / total_ideas) * 100
-                    if duplicate_percentage >= 75:
-                        session["generation_active"] = False
-                        break
+                    if duplicate_percentage >= 50:
+                        should_stop = True
+                
+                if should_stop:
+                    session["generation_active"] = False
+                    break
             
             await asyncio.sleep(0.5)
     except Exception as e:
@@ -194,27 +201,37 @@ async def generate_single_idea_background(session_id: str, include_existing: boo
         problem_statement = session["selected_problem_statement"]
         
         prompts = [
-            "Generate a creative and novel solution to this problem. Think outside the box.",
-            "Approach this problem from a completely different angle. What's an unconventional solution?",
-            "Think about how technology could solve this problem in an innovative way.",
-            "Consider a simple, elegant solution that others might overlook.",
-            "What would a radical, disruptive solution look like for this problem?"
+            "Generate a creative and novel solution to this problem. Think outside the box and diverge hard from conventional approaches.",
+            "Approach this problem from a completely different angle. What's an unconventional solution that challenges assumptions?",
+            "Think about how technology could solve this problem in an innovative way. Consider emerging technologies and future possibilities.",
+            "Consider a simple, elegant solution that others might overlook. Focus on minimalism and user experience.",
+            "What would a radical, disruptive solution look like for this problem? Think about complete paradigm shifts.",
+            "How might we solve this if cost was no object? Dream big and think ambitiously.",
+            "What if we had to solve this with zero technology? Focus on human-centered, low-tech approaches.",
+            "How would a child approach this problem? Think playfully and creatively without constraints."
         ]
         
         base_prompt = prompts[variation % len(prompts)]
         
         existing_ideas_text = ""
+        anti_similarity_text = ""
         if include_existing:
             async with lock:
                 if session["novel_ideas"]:
-                    ideas_list = [f"- {idea['title']}: {idea['description']}" for idea in session["novel_ideas"][:10]]
+                    import random
+                    novel_sample = random.sample(session["novel_ideas"], min(15, len(session["novel_ideas"])))
+                    ideas_list = [f"- {idea['title']}: {idea['description']}" for idea in novel_sample]
                     existing_ideas_text = f"\n\nExisting ideas (generate something DIFFERENT from these):\n" + "\n".join(ideas_list)
+                    
+                    if len(session["novel_ideas"]) >= 5:
+                        themes = [idea['title'].split(':')[0] for idea in session["novel_ideas"][:5]]
+                        anti_similarity_text = f"\n\nAvoid these themes and approaches: {', '.join(themes)}. Diverge significantly from these directions."
         
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
                 {"role": "system", "content": f"You are a creative ideation expert. {base_prompt} Provide your response in this exact format:\nTitle: [Short catchy title]\nDescription: [2-3 lines describing how the idea would work]"},
-                {"role": "user", "content": f"Problem statement: {problem_statement}{existing_ideas_text}\n\nGenerate ONE novel idea."}
+                {"role": "user", "content": f"Problem statement: {problem_statement}{existing_ideas_text}{anti_similarity_text}\n\nGenerate ONE novel idea that is substantially different from existing ideas."}
             ],
             temperature=0.9
         )
@@ -279,32 +296,38 @@ async def check_uniqueness_background(session_id: str, idea_id: str, lock: async
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": "You are an expert at comparing ideas. Determine if a new idea is substantially different from existing ideas or if it's very similar to one of them. Respond with 'UNIQUE' if it's different, or 'SIMILAR: [number]' if it's very similar to one of the existing ideas (provide the number)."},
-                {"role": "user", "content": f"Existing ideas:\n{existing_ideas_text}\n\nNew idea:\n{idea['title']}: {idea['description']}\n\nIs this new idea unique or similar to an existing one?"}
+                {"role": "system", "content": "You are an expert at comparing ideas. Rate the similarity between a new idea and existing ideas on a scale of 0-100, where 0 means completely different and 100 means identical. Respond with ONLY a number between 0-100, followed by a colon and the number of the most similar existing idea (if similarity >= 65). Format: 'SCORE: [number]' or 'SCORE: [number], SIMILAR_TO: [idea_number]'"},
+                {"role": "user", "content": f"Existing ideas:\n{existing_ideas_text}\n\nNew idea:\n{idea['title']}: {idea['description']}\n\nRate the similarity (0-100) and identify the most similar existing idea if score >= 65."}
             ],
             temperature=0.3
         )
         
-        result = response.choices[0].message.content.strip().upper()
+        result = response.choices[0].message.content.strip()
+        
+        similarity_score = 0
+        similar_idx = None
+        
+        try:
+            if "SCORE:" in result.upper():
+                score_part = result.upper().split("SCORE:")[1].split(",")[0].strip()
+                similarity_score = int(''.join(filter(str.isdigit, score_part)))
+            
+            if "SIMILAR_TO:" in result.upper():
+                similar_part = result.upper().split("SIMILAR_TO:")[1].strip()
+                similar_idx = int(''.join(filter(str.isdigit, similar_part))) - 1
+        except (ValueError, IndexError):
+            similarity_score = 0
         
         async with lock:
-            if "UNIQUE" in result:
-                session["novel_ideas"].append(idea)
+            if similarity_score >= 65 and similar_idx is not None and 0 <= similar_idx < len(session["novel_ideas"]):
+                similar_idea = session["novel_ideas"][similar_idx]
+                session["duplicate_ideas"].append({
+                    "idea": idea,
+                    "similar_to": similar_idea["id"],
+                    "similarity_score": similarity_score
+                })
             else:
-                similar_idx = None
-                for word in result.split():
-                    if word.isdigit():
-                        similar_idx = int(word) - 1
-                        break
-                
-                if similar_idx is not None and 0 <= similar_idx < len(session["novel_ideas"]):
-                    similar_idea = session["novel_ideas"][similar_idx]
-                    session["duplicate_ideas"].append({
-                        "idea": idea,
-                        "similar_to": similar_idea["id"]
-                    })
-                else:
-                    session["novel_ideas"].append(idea)
+                session["novel_ideas"].append(idea)
     except Exception as e:
         print(f"Error checking uniqueness: {e}")
         async with lock:
@@ -588,8 +611,8 @@ async def generate_prototypes(input: PrototypeRequest):
             specs_response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You are an expert product designer. Generate 3 distinct app specifications for implementing this idea. Each spec should describe a different approach to the user interface and interaction model. Be specific about features and user flow."},
-                    {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nGenerate 3 distinct app specifications, each with a different UI/UX approach."}
+                    {"role": "system", "content": "You are an expert product designer and UX strategist. Generate 3 distinct, professional app specifications for implementing this idea. Each spec should describe a completely different approach to the user interface, interaction model, and user experience. Focus on creating diverse, innovative UX patterns that differentiate each prototype. Be specific about features, user flows, visual design approach, and interaction patterns."},
+                    {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nGenerate 3 distinct app specifications with significantly different UX approaches:\n1. First spec: Focus on one UX paradigm (e.g., dashboard-based, card-based, timeline-based)\n2. Second spec: Use a completely different interaction model (e.g., conversational, gesture-based, wizard-flow)\n3. Third spec: Explore an alternative visual and navigation approach (e.g., minimal, data-rich, gamified)\n\nFor each spec, describe the visual design, key features, user flow, and what makes it unique."}
                 ],
                 temperature=0.8
             )
@@ -613,8 +636,8 @@ async def generate_prototypes(input: PrototypeRequest):
                 html_response = client.chat.completions.create(
                     model=MODEL,
                     messages=[
-                        {"role": "system", "content": "You are an expert web developer. Create a complete, interactive single-page HTML application with inline CSS and JavaScript. Use modern, clean design with dummy data. Make it fully functional and interactive. Include multiple UI pages/views within the single HTML file using JavaScript to show/hide sections. Use Tailwind CSS via CDN for styling."},
-                        {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nApp Specification:\n{spec}\n\nCreate a complete, interactive HTML application that demonstrates this idea with dummy data and multiple views/pages. Make it visually appealing and fully functional."}
+                        {"role": "system", "content": "You are an expert web developer and UI designer. Create a complete, professional, slick single-page HTML application with inline CSS and JavaScript. The app must be visually stunning with smooth animations, transitions, and moments of joy. Use modern design principles with Tailwind CSS via CDN for styling. Include hover effects, fade-in animations, smooth transitions between views, and micro-interactions. Make it fully functional and interactive with realistic dummy data. The UI should feel polished and production-ready with attention to spacing, typography, colors, and visual hierarchy."},
+                        {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nApp Specification:\n{spec}\n\nCreate a complete, professional, slick HTML application that:\n- Implements the specification with high fidelity\n- Uses smooth animations and transitions (CSS transitions, fade-ins, slide-ins)\n- Has polished UI with proper spacing, typography, and visual hierarchy\n- Includes multiple views/pages with smooth navigation\n- Uses realistic dummy data that demonstrates the concept\n- Has hover effects and micro-interactions for delight\n- Feels production-ready and professional\n\nMake it visually stunning and a pleasure to use."}
                     ],
                     temperature=0.7
                 )
