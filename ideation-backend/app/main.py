@@ -172,11 +172,11 @@ async def run_generation(session_id: str):
                 duplicate_count = len(session["duplicate_ideas"])
                 
                 should_stop = False
-                if novel_count >= 15:
+                if novel_count >= 20:
                     should_stop = True
-                elif total_ideas >= 20:
+                elif total_ideas >= 30:
                     duplicate_percentage = (duplicate_count / total_ideas) * 100
-                    if duplicate_percentage >= 50:
+                    if duplicate_percentage >= 60:
                         should_stop = True
                 
                 if should_stop:
@@ -194,10 +194,6 @@ async def generate_single_idea_background(session_id: str, include_existing: boo
     """Generate a single idea in the background"""
     try:
         session = sessions[session_id]
-        
-        async with lock:
-            session["inflight"] = session.get("inflight", 0) + 1
-        
         problem_statement = session["selected_problem_statement"]
         
         prompts = [
@@ -208,7 +204,15 @@ async def generate_single_idea_background(session_id: str, include_existing: boo
             "What would a radical, disruptive solution look like for this problem? Think about complete paradigm shifts.",
             "How might we solve this if cost was no object? Dream big and think ambitiously.",
             "What if we had to solve this with zero technology? Focus on human-centered, low-tech approaches.",
-            "How would a child approach this problem? Think playfully and creatively without constraints."
+            "How would a child approach this problem? Think playfully and creatively without constraints.",
+            "Invert the problem: what if we did the exact opposite of the obvious solution? How could that work?",
+            "Remove a core assumption: what if one fundamental constraint didn't exist? How would that change the solution?",
+            "Domain transfer: how would this problem be solved in a completely different industry or field? Apply that approach here.",
+            "Time-shift: imagine solving this problem 50 years in the future with advanced technology. What would that look like?",
+            "Extreme user perspective: how would someone with very different needs (astronaut, child, elderly person) solve this?",
+            "Combine random elements: merge two completely unrelated concepts to create a novel hybrid solution.",
+            "First principles: break the problem down to fundamental truths and rebuild the solution from scratch.",
+            "Constraint flip: what if we had to solve this with the opposite resources (more time but less money, or vice versa)?"
         ]
         
         base_prompt = prompts[variation % len(prompts)]
@@ -219,7 +223,7 @@ async def generate_single_idea_background(session_id: str, include_existing: boo
             async with lock:
                 if session["novel_ideas"]:
                     import random
-                    novel_sample = random.sample(session["novel_ideas"], min(15, len(session["novel_ideas"])))
+                    novel_sample = random.sample(session["novel_ideas"], min(7, len(session["novel_ideas"])))
                     ideas_list = [f"- {idea['title']}: {idea['description']}" for idea in novel_sample]
                     existing_ideas_text = f"\n\nExisting ideas (generate something DIFFERENT from these):\n" + "\n".join(ideas_list)
                     
@@ -233,7 +237,8 @@ async def generate_single_idea_background(session_id: str, include_existing: boo
                 {"role": "system", "content": f"You are a creative ideation expert. {base_prompt} Provide your response in this exact format:\nTitle: [Short catchy title]\nDescription: [2-3 lines describing how the idea would work]"},
                 {"role": "user", "content": f"Problem statement: {problem_statement}{existing_ideas_text}{anti_similarity_text}\n\nGenerate ONE novel idea that is substantially different from existing ideas."}
             ],
-            temperature=0.9
+            temperature=1.1,
+            top_p=0.9
         )
         
         idea_text = response.choices[0].message.content.strip()
@@ -299,7 +304,8 @@ async def check_uniqueness_background(session_id: str, idea_id: str, lock: async
                 {"role": "system", "content": "You are an expert at comparing ideas. Rate the similarity between a new idea and existing ideas on a scale of 0-100, where 0 means completely different and 100 means identical. Respond with ONLY a number between 0-100, followed by a colon and the number of the most similar existing idea (if similarity >= 65). Format: 'SCORE: [number]' or 'SCORE: [number], SIMILAR_TO: [idea_number]'"},
                 {"role": "user", "content": f"Existing ideas:\n{existing_ideas_text}\n\nNew idea:\n{idea['title']}: {idea['description']}\n\nRate the similarity (0-100) and identify the most similar existing idea if score >= 65."}
             ],
-            temperature=0.3
+            temperature=0.2,
+            top_p=0.2
         )
         
         result = response.choices[0].message.content.strip()
@@ -319,7 +325,7 @@ async def check_uniqueness_background(session_id: str, idea_id: str, lock: async
             similarity_score = 0
         
         async with lock:
-            if similarity_score >= 65 and similar_idx is not None and 0 <= similar_idx < len(session["novel_ideas"]):
+            if similarity_score >= 80 and similar_idx is not None and 0 <= similar_idx < len(session["novel_ideas"]):
                 similar_idea = session["novel_ideas"][similar_idx]
                 session["duplicate_ideas"].append({
                     "idea": idea,
@@ -327,6 +333,9 @@ async def check_uniqueness_background(session_id: str, idea_id: str, lock: async
                     "similarity_score": similarity_score
                 })
             else:
+                if similarity_score >= 65 and similar_idx is not None and 0 <= similar_idx < len(session["novel_ideas"]):
+                    idea["similar_to"] = session["novel_ideas"][similar_idx]["id"]
+                    idea["similarity_score"] = similarity_score
                 session["novel_ideas"].append(idea)
     except Exception as e:
         print(f"Error checking uniqueness: {e}")
@@ -345,7 +354,7 @@ async def select_problem_statement(input: ProblemStatementSelection):
     session["novel_ideas"] = []
     session["duplicate_ideas"] = []
     session["generation_active"] = True
-    session["inflight"] = 0
+    session["inflight"] = 5
     
     task = asyncio.create_task(run_generation(input.session_id))
     session["generation_task"] = task
