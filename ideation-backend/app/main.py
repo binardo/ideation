@@ -602,87 +602,138 @@ async def like_idea(session_id: str, idea_id: str):
     
     raise HTTPException(status_code=404, detail="Idea not found")
 
+async def generate_single_prototype_background(session_id: str, idea_id: str, idea_title: str, idea_description: str, lock: asyncio.Lock):
+    """Generate prototypes for a single idea in the background"""
+    try:
+        session = sessions[session_id]
+        
+        specs_response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": "You are an expert product designer and UX strategist. Generate 3 distinct, professional app specifications for implementing this idea. Each spec should describe a completely different approach to the user interface, interaction model, and user experience. Focus on creating diverse, innovative UX patterns that differentiate each prototype. Be specific about features, user flows, visual design approach, and interaction patterns."},
+                {"role": "user", "content": f"Idea: {idea_title}\nDescription: {idea_description}\n\nGenerate 3 distinct app specifications with significantly different UX approaches:\n1. First spec: Focus on one UX paradigm (e.g., dashboard-based, card-based, timeline-based)\n2. Second spec: Use a completely different interaction model (e.g., conversational, gesture-based, wizard-flow)\n3. Third spec: Explore an alternative visual and navigation approach (e.g., minimal, data-rich, gamified)\n\nFor each spec, describe the visual design, key features, user flow, and what makes it unique."}
+            ],
+            temperature=0.8
+        )
+        
+        specs_text = specs_response.choices[0].message.content
+        
+        specs = []
+        current_spec = []
+        for line in specs_text.split('\n'):
+            if line.strip() and (line.strip()[0].isdigit() or line.strip().startswith('Spec')):
+                if current_spec:
+                    specs.append('\n'.join(current_spec))
+                current_spec = [line]
+            elif line.strip() and current_spec:
+                current_spec.append(line)
+        if current_spec:
+            specs.append('\n'.join(current_spec))
+        
+        idea_prototypes = []
+        for i, spec in enumerate(specs[:3]):
+            html_response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert web developer and UI designer. Create a complete, professional, slick single-page HTML application with inline CSS and JavaScript. The app must be visually stunning with smooth animations, transitions, and moments of joy. Use modern design principles with Tailwind CSS via CDN for styling. Include hover effects, fade-in animations, smooth transitions between views, and micro-interactions. Make it fully functional and interactive with realistic dummy data. The UI should feel polished and production-ready with attention to spacing, typography, colors, and visual hierarchy."},
+                    {"role": "user", "content": f"Idea: {idea_title}\nDescription: {idea_description}\n\nApp Specification:\n{spec}\n\nCreate a complete, professional, slick HTML application that:\n- Implements the specification with high fidelity\n- Uses smooth animations and transitions (CSS transitions, fade-ins, slide-ins)\n- Has polished UI with proper spacing, typography, and visual hierarchy\n- Includes multiple views/pages with smooth navigation\n- Uses realistic dummy data that demonstrates the concept\n- Has hover effects and micro-interactions for delight\n- Feels production-ready and professional\n\nMake it visually stunning and a pleasure to use."}
+                ],
+                temperature=0.7
+            )
+            
+            html_content = html_response.choices[0].message.content
+            
+            if "```html" in html_content:
+                html_content = html_content.split("```html")[1].split("```")[0].strip()
+            elif "```" in html_content:
+                html_content = html_content.split("```")[1].split("```")[0].strip()
+            
+            prototype_data = {
+                "spec_number": i + 1,
+                "spec": spec,
+                "html": html_content,
+                "status": "completed"
+            }
+            
+            idea_prototypes.append(prototype_data)
+            
+            async with lock:
+                for proto in session["prototypes"]:
+                    if proto["idea_id"] == idea_id:
+                        proto["prototypes"][i] = prototype_data
+                        break
+        
+        async with lock:
+            for proto in session["prototypes"]:
+                if proto["idea_id"] == idea_id:
+                    proto["status"] = "completed"
+                    break
+                    
+    except Exception as e:
+        print(f"Error generating prototype for {idea_id}: {e}")
+        async with lock:
+            for proto in session["prototypes"]:
+                if proto["idea_id"] == idea_id:
+                    proto["status"] = "error"
+                    proto["error"] = str(e)
+                    break
+
 @app.post("/api/generate-prototypes")
 async def generate_prototypes(input: PrototypeRequest):
-    """Generate prototype HTML apps for selected ideas"""
+    """Start generating prototype HTML apps for selected ideas in the background"""
     if input.session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
     session = sessions[input.session_id]
-    prototypes = []
     
+    prototypes = []
     for idea_id in input.idea_ids:
         idea = next((i for i in session["novel_ideas"] if i["id"] == idea_id), None)
         if not idea:
             continue
         
-        try:
-            specs_response = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": "You are an expert product designer and UX strategist. Generate 3 distinct, professional app specifications for implementing this idea. Each spec should describe a completely different approach to the user interface, interaction model, and user experience. Focus on creating diverse, innovative UX patterns that differentiate each prototype. Be specific about features, user flows, visual design approach, and interaction patterns."},
-                    {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nGenerate 3 distinct app specifications with significantly different UX approaches:\n1. First spec: Focus on one UX paradigm (e.g., dashboard-based, card-based, timeline-based)\n2. Second spec: Use a completely different interaction model (e.g., conversational, gesture-based, wizard-flow)\n3. Third spec: Explore an alternative visual and navigation approach (e.g., minimal, data-rich, gamified)\n\nFor each spec, describe the visual design, key features, user flow, and what makes it unique."}
-                ],
-                temperature=0.8
-            )
-            
-            specs_text = specs_response.choices[0].message.content
-            
-            specs = []
-            current_spec = []
-            for line in specs_text.split('\n'):
-                if line.strip() and (line.strip()[0].isdigit() or line.strip().startswith('Spec')):
-                    if current_spec:
-                        specs.append('\n'.join(current_spec))
-                    current_spec = [line]
-                elif line.strip() and current_spec:
-                    current_spec.append(line)
-            if current_spec:
-                specs.append('\n'.join(current_spec))
-            
-            idea_prototypes = []
-            for i, spec in enumerate(specs[:3]):
-                html_response = client.chat.completions.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": "You are an expert web developer and UI designer. Create a complete, professional, slick single-page HTML application with inline CSS and JavaScript. The app must be visually stunning with smooth animations, transitions, and moments of joy. Use modern design principles with Tailwind CSS via CDN for styling. Include hover effects, fade-in animations, smooth transitions between views, and micro-interactions. Make it fully functional and interactive with realistic dummy data. The UI should feel polished and production-ready with attention to spacing, typography, colors, and visual hierarchy."},
-                        {"role": "user", "content": f"Idea: {idea['title']}\nDescription: {idea['description']}\n\nApp Specification:\n{spec}\n\nCreate a complete, professional, slick HTML application that:\n- Implements the specification with high fidelity\n- Uses smooth animations and transitions (CSS transitions, fade-ins, slide-ins)\n- Has polished UI with proper spacing, typography, and visual hierarchy\n- Includes multiple views/pages with smooth navigation\n- Uses realistic dummy data that demonstrates the concept\n- Has hover effects and micro-interactions for delight\n- Feels production-ready and professional\n\nMake it visually stunning and a pleasure to use."}
-                    ],
-                    temperature=0.7
-                )
-                
-                html_content = html_response.choices[0].message.content
-                
-                if "```html" in html_content:
-                    html_content = html_content.split("```html")[1].split("```")[0].strip()
-                elif "```" in html_content:
-                    html_content = html_content.split("```")[1].split("```")[0].strip()
-                
-                idea_prototypes.append({
-                    "spec_number": i + 1,
-                    "spec": spec,
-                    "html": html_content
-                })
-            
-            prototypes.append({
-                "idea_id": idea_id,
-                "idea_title": idea["title"],
-                "prototypes": idea_prototypes
-            })
-            
-        except Exception as e:
-            print(f"Error generating prototype for {idea_id}: {e}")
-            continue
+        prototypes.append({
+            "idea_id": idea_id,
+            "idea_title": idea["title"],
+            "status": "generating",
+            "prototypes": [
+                {"spec_number": 1, "spec": "", "html": "", "status": "generating"},
+                {"spec_number": 2, "spec": "", "html": "", "status": "generating"},
+                {"spec_number": 3, "spec": "", "html": "", "status": "generating"}
+            ]
+        })
     
     session["prototypes"] = prototypes
+    session["prototype_generation_active"] = True
     
-    return {"prototypes": prototypes}
+    if input.session_id not in session_locks:
+        session_locks[input.session_id] = asyncio.Lock()
+    
+    lock = session_locks[input.session_id]
+    
+    for idea_id in input.idea_ids:
+        idea = next((i for i in session["novel_ideas"] if i["id"] == idea_id), None)
+        if idea:
+            asyncio.create_task(
+                generate_single_prototype_background(
+                    input.session_id,
+                    idea_id,
+                    idea["title"],
+                    idea["description"],
+                    lock
+                )
+            )
+    
+    return {"status": "started", "prototypes": prototypes}
 
 @app.get("/api/get-prototypes/{session_id}")
 async def get_prototypes(session_id: str):
-    """Get generated prototypes for a session"""
+    """Get generated prototypes for a session with status"""
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
     session = sessions[session_id]
-    return {"prototypes": session.get("prototypes", [])}
+    return {
+        "prototypes": session.get("prototypes", []),
+        "prototype_generation_active": session.get("prototype_generation_active", False)
+    }

@@ -31,10 +31,12 @@ interface DuplicateIdea {
 interface Prototype {
   idea_id: string
   idea_title: string
+  status?: string
   prototypes: {
     spec_number: number
     spec: string
     html: string
+    status?: string
   }[]
 }
 
@@ -162,6 +164,13 @@ function App() {
     }
   }, [stage, sessionId])
 
+  useEffect(() => {
+    if (stage === 'prototypes' && sessionId && generatingPrototypes) {
+      const interval = setInterval(checkPrototypeStatus, 2000)
+      return () => clearInterval(interval)
+    }
+  }, [stage, sessionId, generatingPrototypes])
+
   const updateIdea = async (ideaId: string, title: string, description: string) => {
     try {
       await fetch(
@@ -224,6 +233,19 @@ function App() {
       console.error('Error generating prototypes:', error)
     }
     setGeneratingPrototypes(false)
+  }
+
+  const checkPrototypeStatus = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/get-prototypes/${sessionId}`)
+      const data = await response.json()
+      setPrototypes(data.prototypes)
+      if (!data.prototype_generation_active) {
+        setGeneratingPrototypes(false)
+      }
+    } catch (error) {
+      console.error('Error checking prototype status:', error)
+    }
   }
 
   const getSimilarIdeas = (ideaId: string) => {
@@ -605,21 +627,35 @@ function App() {
                         </CardHeader>
                         <CardContent>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {prototype.prototypes.map((proto, idx) => (
-                              <Card
-                                key={idx}
-                                className="border hover:border-purple-400 transition-all cursor-pointer"
-                                onClick={() => setViewingPrototype({ ideaId: prototype.idea_id, prototypeIdx: idx })}
-                              >
-                                <CardContent className="pt-6">
-                                  <Badge className="mb-2">Prototype {proto.spec_number}</Badge>
-                                  <p className="text-sm text-gray-600 line-clamp-3">{proto.spec}</p>
-                                  <Button variant="outline" className="w-full mt-4">
-                                    View Prototype
-                                  </Button>
-                                </CardContent>
-                              </Card>
-                            ))}
+                            {prototype.prototypes.map((proto, idx) => {
+                              const isCompleted = proto.status === 'completed'
+                              const isGenerating = proto.status === 'generating'
+                              
+                              return (
+                                <Card
+                                  key={idx}
+                                  className={`border transition-all ${isCompleted ? 'hover:border-purple-400 cursor-pointer' : 'cursor-not-allowed opacity-75'}`}
+                                  onClick={() => isCompleted && setViewingPrototype({ ideaId: prototype.idea_id, prototypeIdx: idx })}
+                                >
+                                  <CardContent className="pt-6">
+                                    <Badge className="mb-2">Prototype {proto.spec_number}</Badge>
+                                    {isGenerating ? (
+                                      <div className="flex flex-col items-center justify-center py-8">
+                                        <Spinner className="mb-2" />
+                                        <p className="text-sm text-gray-500">Generating...</p>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <p className="text-sm text-gray-600 line-clamp-3">{proto.spec}</p>
+                                        <Button variant="outline" className="w-full mt-4" disabled={!isCompleted}>
+                                          View Prototype
+                                        </Button>
+                                      </>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              )
+                            })}
                           </div>
                         </CardContent>
                       </Card>
