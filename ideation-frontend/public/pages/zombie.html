@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Soldiers vs Zombies Simulation</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #020617;
+      color: #e5e7eb;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: radial-gradient(circle at 50% 10%, #1e293b, #020617 60%);
+      cursor: crosshair;
+    }
+
+    #topBar {
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15,23,42,0.88);
+      border-radius: 999px;
+      padding: 6px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      backdrop-filter: blur(12px);
+      z-index: 20;
+      border: 1px solid rgba(148,163,184,0.25);
+      font-size: 12px;
+    }
+
+    #topBar .team {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #topBar .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+    }
+
+    #topBar .dot.soldier {
+      background: radial-gradient(circle at 30% 30%, #e5e7eb, #38bdf8);
+      box-shadow: 0 0 10px #38bdf8aa;
+    }
+
+    #topBar .dot.zombie {
+      background: radial-gradient(circle at 30% 30%, #bbf7d0, #22c55e);
+      box-shadow: 0 0 10px #22c55eaa;
+    }
+
+    #topBar span.value {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+
+    button {
+      border-radius: 999px;
+      padding: 4px 10px;
+      border: none;
+      font-size: 12px;
+      cursor: pointer;
+      background: #0f766e;
+      color: white;
+      box-shadow: 0 4px 18px rgba(15,118,110,0.5);
+      transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(15,118,110,0.8);
+      background: #0d9488;
+    }
+
+    button:active {
+      transform: translateY(0);
+      box-shadow: 0 3px 12px rgba(15,118,110,0.7);
+    }
+
+    #status {
+      font-size: 11px;
+      opacity: 0.9;
+      margin-left: 8px;
+    }
+
+    #overlayText {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      font-size: 40px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+      text-shadow: 0 15px 35px rgba(0,0,0,0.7);
+      z-index: 15;
+    }
+
+    #overlayText.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    #overlayText span {
+      padding: 10px 22px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.75);
+      border: 1px solid rgba(148,163,184,0.5);
+      backdrop-filter: blur(18px);
+    }
+
+    #overlayText.win-soldiers span {
+      color: #38bdf8;
+    }
+    #overlayText.win-zombies span {
+      color: #22c55e;
+    }
+    #overlayText.draw span {
+      color: #e5e7eb;
+    }
+
+    /* Config panel */
+    #configPanel {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      width: 260px;
+      max-height: calc(100vh - 20px);
+      background: rgba(15,23,42,0.96);
+      border-radius: 14px;
+      border: 1px solid rgba(148,163,184,0.35);
+      box-shadow: 0 16px 40px rgba(0,0,0,0.8);
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #cbd5f5;
+      backdrop-filter: blur(18px);
+      overflow: hidden;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    #configHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(51,65,85,0.9);
+      margin-bottom: 4px;
+    }
+
+    #configHeader span.title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: #e5e7eb;
+    }
+
+    #configBody {
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .sectionTitle {
+      margin-top: 6px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #9ca3af;
+    }
+
+    .field {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .fieldRow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: 11px;
+      color: #e5e7eb;
+    }
+
+    .field input[type="number"] {
+      width: 80px;
+      padding: 2px 4px;
+      border-radius: 6px;
+      border: 1px solid rgba(55,65,81,0.9);
+      background: rgba(15,23,42,0.95);
+      color: #e5e7eb;
+      font-size: 11px;
+    }
+
+    .field input[type="range"] {
+      width: 100%;
+    }
+
+    .smallLabel {
+      font-size: 10px;
+      color: #9ca3af;
+    }
+
+    .radioRow {
+      display: flex;
+      gap: 6px;
+      margin-top: 2px;
+      flex-wrap: wrap;
+    }
+
+    .radioRow label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .pillToggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+    }
+
+    .pillToggle input {
+      width: 11px;
+      height: 11px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="battle"></canvas>
+
+  <div id="topBar">
+    <div class="team">
+      <div class="dot soldier"></div>
+      <div>Soldiers: <span id="soldierCount" class="value">0</span></div>
+    </div>
+    <div class="team">
+      <div class="dot zombie"></div>
+      <div>Zombies: <span id="zombieCount" class="value">0</span></div>
+    </div>
+
+    <button id="startResetBtn">Start / Reset Battle</button>
+    <button id="toggleTrailsBtn">Toggle Trails</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="overlayText"><span></span></div>
+
+  <div id="configPanel">
+    <div id="configHeader">
+      <span class="title">Battle Config</span>
+      <span id="configToggleIcon">▾</span>
+    </div>
+    <div id="configBody">
+      <div class="sectionTitle">Counts</div>
+      <div class="field">
+        <div class="fieldRow">
+          <label for="soldierNum">Soldiers</label>
+          <input id="soldierNum" type="number" min="1" max="200" value="20">
+        </div>
+        <div class="fieldRow">
+          <label for="zombieNum">Zombies</label>
+          <input id="zombieNum" type="number" min="1" max="400" value="120">
+        </div>
+      </div>
+
+      <div class="sectionTitle">Speed (units/sec)</div>
+      <div class="field">
+        <label for="soldierSpeed">Soldier Speed: <span id="soldierSpeedVal">55</span></label>
+        <input id="soldierSpeed" type="range" min="20" max="140" value="55">
+      </div>
+      <div class="field">
+        <label for="zombieSpeed">Zombie Speed: <span id="zombieSpeedVal">55</span></label>
+        <input id="zombieSpeed" type="range" min="20" max="140" value="55">
+      </div>
+
+      <div class="sectionTitle">Combat</div>
+      <div class="field">
+        <label for="swordMult">Sword Damage Multiplier: <span id="swordMultVal">1.3</span>x</label>
+        <input id="swordMult" type="range" min="1" max="2" step="0.05" value="1.3">
+        <span class="smallLabel">Base damage is 10; swords multiply that.</span>
+      </div>
+      <div class="field">
+        <label for="armorRed">Armor Damage Taken: <span id="armorRedVal">50</span>%</label>
+        <input id="armorRed" type="range" min="10" max="100" step="5" value="50">
+        <span class="smallLabel">Percentage of normal damage soldiers take (lower = stronger armor).</span>
+      </div>
+
+      <div class="sectionTitle">Placement</div>
+      <div class="field">
+        <div class="radioRow">
+          <label>
+            <input type="radio" name="placement" value="random" checked>
+            Random field
+          </label>
+          <label>
+            <input type="radio" name="placement" value="sides">
+            Opposite sides
+          </label>
+        </div>
+        <span class="smallLabel">Opposite sides: soldiers on one side, zombies on the other.</span>
+      </div>
+
+      <div class="sectionTitle">Barriers</div>
+      <div class="field">
+        <div class="fieldRow">
+          <label for="barrierCount">Barrier lines</label>
+          <input id="barrierCount" type="number" min="0" max="30" value="5">
+        </div>
+        <span class="smallLabel">Random lines that block movement (units must go around).</span>
+      </div>
+
+      <div class="sectionTitle">Physics</div>
+      <div class="field">
+        <label class="pillToggle">
+          <input type="checkbox" id="nonOverlap" checked>
+          Prevent unit overlap
+        </label>
+        <span class="smallLabel">Units behave like soft circles and push away from each other.</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Simulation constants
+    const BASE_DAMAGE = 10;
+    const BASE_HP = 100;
+    const ATTACK_RANGE = 20;
+    const ATTACK_COOLDOWN = 0.6;
+    const SOLDIER_RADIUS = 6;
+    const ZOMBIE_RADIUS = 5;
+    const HEALTH_BAR_HEIGHT = 3;
+    const REPULSION_ITERATIONS = 2; // for non-overlap resolution
+    const REPULSION_STRENGTH = 0.5;
+
+    const canvas = document.getElementById("battle");
+    const ctx = canvas.getContext("2d");
+
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+
+    window.addEventListener("resize", () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    });
+
+    const soldierCountEl = document.getElementById("soldierCount");
+    const zombieCountEl = document.getElementById("zombieCount");
+    const statusEl = document.getElementById("status");
+    const startResetBtn = document.getElementById("startResetBtn");
+    const toggleTrailsBtn = document.getElementById("toggleTrailsBtn");
+    const overlayText = document.getElementById("overlayText");
+
+    // Config elements
+    const soldierNumInput = document.getElementById("soldierNum");
+    const zombieNumInput = document.getElementById("zombieNum");
+    const soldierSpeedInput = document.getElementById("soldierSpeed");
+    const zombieSpeedInput = document.getElementById("zombieSpeed");
+    const soldierSpeedVal = document.getElementById("soldierSpeedVal");
+    const zombieSpeedVal = document.getElementById("zombieSpeedVal");
+    const swordMultInput = document.getElementById("swordMult");
+    const swordMultVal = document.getElementById("swordMultVal");
+    const armorRedInput = document.getElementById("armorRed");
+    const armorRedVal = document.getElementById("armorRedVal");
+    const barrierCountInput = document.getElementById("barrierCount");
+    const nonOverlapCheckbox = document.getElementById("nonOverlap");
+
+    const placementRadios = Array.from(document.querySelectorAll("input[name='placement']"));
+
+    // Config panel toggle
+    const configPanel = document.getElementById("configPanel");
+    const configHeader = document.getElementById("configHeader");
+    const configBody = document.getElementById("configBody");
+    const configToggleIcon = document.getElementById("configToggleIcon");
+    let configCollapsed = false;
+
+    configHeader.addEventListener("click", () => {
+      configCollapsed = !configCollapsed;
+      if (configCollapsed) {
+        configBody.style.display = "none";
+        configToggleIcon.textContent = "▸";
+        configPanel.style.width = "160px";
+      } else {
+        configBody.style.display = "block";
+        configToggleIcon.textContent = "▾";
+        configPanel.style.width = "260px";
+      }
+    });
+
+    // Live labels
+    function updateSliderLabels() {
+      soldierSpeedVal.textContent = soldierSpeedInput.value;
+      zombieSpeedVal.textContent = zombieSpeedInput.value;
+      swordMultVal.textContent = parseFloat(swordMultInput.value).toFixed(2);
+      armorRedVal.textContent = armorRedInput.value;
+    }
+    soldierSpeedInput.addEventListener("input", updateSliderLabels);
+    zombieSpeedInput.addEventListener("input", updateSliderLabels);
+    swordMultInput.addEventListener("input", updateSliderLabels);
+    armorRedInput.addEventListener("input", updateSliderLabels);
+    updateSliderLabels();
+
+    let units = [];
+    let barriers = [];
+    let lastTimestamp = 0;
+    let trails = true;
+    let battleOver = false;
+
+    toggleTrailsBtn.addEventListener("click", () => {
+      trails = !trails;
+    });
+
+    startResetBtn.addEventListener("click", () => {
+      initBattleFromUI();
+    });
+
+    function randInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function distance(ax, ay, bx, by) {
+      const dx = ax - bx;
+      const dy = ay - by;
+      return Math.hypot(dx, dy);
+    }
+
+    function lineSegmentsIntersect(p0, p1, p2, p3) {
+      // Segment p0-p1 with p2-p3
+      const s1x = p1.x - p0.x;
+      const s1y = p1.y - p0.y;
+      const s2x = p3.x - p2.x;
+      const s2y = p3.y - p2.y;
+
+      const denom = (-s2x * s1y + s1x * s2y);
+      if (Math.abs(denom) < 1e-8) return false; // parallel
+
+      const s = (-s1y * (p0.x - p2.x) + s1x * (p0.y - p2.y)) / denom;
+      const t = ( s2x * (p0.y - p2.y) - s2y * (p0.x - p2.x)) / denom;
+
+      return (s >= 0 && s <= 1 && t >= 0 && t <= 1);
+    }
+
+    function createUnit(type) {
+      return {
+        id: Math.random().toString(36).slice(2),
+        type,
+        x: 0,
+        y: 0,
+        hp: BASE_HP,
+        maxHp: BASE_HP,
+        attackCooldown: Math.random() * ATTACK_COOLDOWN,
+        targetId: null,
+        radius: type === "soldier" ? SOLDIER_RADIUS : ZOMBIE_RADIUS
+      };
+    }
+
+    function generateBarriers(count) {
+      barriers = [];
+      for (let i = 0; i < count; i++) {
+        const x1 = randInRange(width * 0.1, width * 0.9);
+        const y1 = randInRange(height * 0.1, height * 0.9);
+        const length = randInRange(80, 200);
+        const angle = randInRange(0, Math.PI * 2);
+        const x2 = x1 + Math.cos(angle) * length;
+        const y2 = y1 + Math.sin(angle) * length;
+        barriers.push({
+          x1, y1, x2, y2
+        });
+      }
+    }
+
+    function placeUnitsRandom(units) {
+      for (const u of units) {
+        u.x = randInRange(width * 0.05, width * 0.95);
+        u.y = randInRange(height * 0.05, height * 0.95);
+      }
+    }
+
+    function placeUnitsSides(units) {
+      const soldiers = units.filter(u => u.type === "soldier");
+      const zombies = units.filter(u => u.type === "zombie");
+
+      for (const s of soldiers) {
+        s.x = randInRange(width * 0.1, width * 0.25);
+        s.y = randInRange(height * 0.1, height * 0.9);
+      }
+      for (const z of zombies) {
+        z.x = randInRange(width * 0.75, width * 0.9);
+        z.y = randInRange(height * 0.1, height * 0.9);
+      }
+    }
+
+    function initBattleFromUI() {
+      const numSoldiers = Math.max(1, Math.min(200, parseInt(soldierNumInput.value || "20", 10)));
+      const numZombies = Math.max(1, Math.min(400, parseInt(zombieNumInput.value || "120", 10)));
+      soldierNumInput.value = numSoldiers;
+      zombieNumInput.value = numZombies;
+
+      const barrierCount = Math.max(0, Math.min(30, parseInt(barrierCountInput.value || "0", 10)));
+      barrierCountInput.value = barrierCount;
+
+      units = [];
+      for (let i = 0; i < numSoldiers; i++) units.push(createUnit("soldier"));
+      for (let i = 0; i < numZombies; i++) units.push(createUnit("zombie"));
+
+      const placementMode = placementRadios.find(r => r.checked)?.value || "random";
+      if (placementMode === "sides") {
+        placeUnitsSides(units);
+      } else {
+        placeUnitsRandom(units);
+      }
+
+      generateBarriers(barrierCount);
+
+      lastTimestamp = performance.now();
+      battleOver = false;
+      overlayText.className = "";
+      overlayText.querySelector("span").textContent = "";
+      statusEl.textContent = "Battle in progress. Adjust config and press Start / Reset to apply.";
+
+      updateCounts();
+    }
+
+    function updateCounts() {
+      const aliveSoldiers = units.filter(u => u.type === "soldier" && u.hp > 0).length;
+      const aliveZombies = units.filter(u => u.type === "zombie" && u.hp > 0).length;
+      soldierCountEl.textContent = aliveSoldiers;
+      zombieCountEl.textContent = aliveZombies;
+
+      if (!battleOver && (aliveSoldiers === 0 || aliveZombies === 0)) {
+        battleOver = true;
+        let text = "";
+        let cls = "";
+        if (aliveSoldiers > 0 && aliveZombies === 0) {
+          text = "Soldiers Win";
+          cls = "win-soldiers";
+        } else if (aliveZombies > 0 && aliveSoldiers === 0) {
+          text = "Zombies Win";
+          cls = "win-zombies";
+        } else {
+          text = "Draw";
+          cls = "draw";
+        }
+        overlayText.className = "show " + cls;
+        overlayText.querySelector("span").textContent = text;
+        statusEl.textContent = `Battle over • Soldiers: ${aliveSoldiers} • Zombies: ${aliveZombies}`;
+      }
+    }
+
+    function findTarget(unit) {
+      const enemies = units.filter(u => u.hp > 0 && u.type !== unit.type);
+      if (enemies.length === 0) return null;
+      let closest = enemies[0];
+      let bestDist = distance(unit.x, unit.y, closest.x, closest.y);
+      for (let i = 1; i < enemies.length; i++) {
+        const e = enemies[i];
+        const d = distance(unit.x, unit.y, e.x, e.y);
+        if (d < bestDist) {
+          bestDist = d;
+          closest = e;
+        }
+      }
+      return closest;
+    }
+
+    function tryAttack(attacker, target, dt) {
+      if (!target || target.hp <= 0) return;
+      attacker.attackCooldown -= dt;
+      if (attacker.attackCooldown > 0) return;
+
+      const d = distance(attacker.x, attacker.y, target.x, target.y);
+      if (d <= ATTACK_RANGE) {
+        const swordMult = parseFloat(swordMultInput.value || "1.3");
+        const armorPercent = parseFloat(armorRedInput.value || "50");
+        const armorMult = armorPercent / 100;
+
+        let dmg;
+        if (attacker.type === "soldier") {
+          dmg = BASE_DAMAGE * swordMult;
+        } else {
+          if (target.type === "soldier") {
+            dmg = BASE_DAMAGE * armorMult;
+          } else {
+            dmg = BASE_DAMAGE;
+          }
+        }
+        target.hp -= dmg;
+        if (target.hp < 0) target.hp = 0;
+        attacker.attackCooldown = ATTACK_COOLDOWN;
+      }
+    }
+
+    function moveTowards(unit, target, dt) {
+      if (!target) return;
+
+      const dx = target.x - unit.x;
+      const dy = target.y - unit.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1e-3) return;
+
+      if (dist <= ATTACK_RANGE * 0.8) return;
+
+      const soldierSpeed = parseFloat(soldierSpeedInput.value || "55");
+      const zombieSpeed = parseFloat(zombieSpeedInput.value || "55");
+      const speed = unit.type === "soldier" ? soldierSpeed : zombieSpeed;
+
+      const maxMove = speed * dt;
+      const ratio = Math.min(1, maxMove / dist);
+      const newX = unit.x + dx * ratio;
+      const newY = unit.y + dy * ratio;
+
+      // Check barriers: if movement path intersects any barrier, cancel this move
+      const p0 = { x: unit.x, y: unit.y };
+      const p1 = { x: newX, y: newY };
+      let blocked = false;
+      for (const b of barriers) {
+        const p2 = { x: b.x1, y: b.y1 };
+        const p3 = { x: b.x2, y: b.y2 };
+        if (lineSegmentsIntersect(p0, p1, p2, p3)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) {
+        unit.x = newX;
+        unit.y = newY;
+      }
+    }
+
+    function resolveNonOverlap() {
+      if (!nonOverlapCheckbox.checked) return;
+
+      const n = units.length;
+      for (let iter = 0; iter < REPULSION_ITERATIONS; iter++) {
+        for (let i = 0; i < n; i++) {
+          const a = units[i];
+          if (a.hp <= 0) continue;
+          for (let j = i + 1; j < n; j++) {
+            const b = units[j];
+            if (b.hp <= 0) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy) || 0.001;
+            const minDist = a.radius + b.radius + 1; // tiny gap
+
+            if (dist < minDist) {
+              const overlap = minDist - dist;
+              const nx = dx / dist;
+              const ny = dy / dist;
+              const move = overlap * 0.5 * REPULSION_STRENGTH;
+
+              // Proposed new positions
+              const axNew = a.x - nx * move;
+              const ayNew = a.y - ny * move;
+              const bxNew = b.x + nx * move;
+              const byNew = b.y + ny * move;
+
+              // Keep within bounds & ignore barrier collisions here for simplicity
+              a.x = Math.min(width - 5, Math.max(5, axNew));
+              a.y = Math.min(height - 5, Math.max(5, ayNew));
+              b.x = Math.min(width - 5, Math.max(5, bxNew));
+              b.y = Math.min(height - 5, Math.max(5, byNew));
+            }
+          }
+        }
+      }
+    }
+
+    function update(dt) {
+      if (battleOver) return;
+
+      const aliveUnits = units.filter(u => u.hp > 0);
+      const aliveSoldiers = aliveUnits.filter(u => u.type === "soldier").length;
+      const aliveZombies = aliveUnits.filter(u => u.type === "zombie").length;
+      if (aliveSoldiers === 0 || aliveZombies === 0) {
+        updateCounts();
+        return;
+      }
+
+      // Movement & targeting
+      for (const unit of aliveUnits) {
+        let target = units.find(u => u.id === unit.targetId && u.hp > 0);
+        if (!target) {
+          target = findTarget(unit);
+          unit.targetId = target ? target.id : null;
+        }
+        if (target) moveTowards(unit, target, dt);
+      }
+
+      // Resolve overlap after moving
+      resolveNonOverlap();
+
+      // Combat
+      for (const unit of aliveUnits) {
+        let target = units.find(u => u.id === unit.targetId && u.hp > 0);
+        if (!target) {
+          target = findTarget(unit);
+          unit.targetId = target ? target.id : null;
+        }
+        if (target) tryAttack(unit, target, dt);
+      }
+
+      updateCounts();
+    }
+
+    function drawUnit(u) {
+      const radius = u.radius;
+
+      // Glow
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(u.x, u.y, radius + 4, 0, Math.PI * 2);
+      if (u.type === "soldier") {
+        ctx.fillStyle = "rgba(56,189,248,0.18)";
+      } else {
+        ctx.fillStyle = "rgba(34,197,94,0.15)";
+      }
+      ctx.fill();
+      ctx.restore();
+
+      // Body
+      const gradient = ctx.createRadialGradient(
+        u.x - radius / 3, u.y - radius / 3, 1,
+        u.x, u.y, radius
+      );
+      if (u.type === "soldier") {
+        gradient.addColorStop(0, "#e5e7eb");
+        gradient.addColorStop(1, "#38bdf8");
+      } else {
+        gradient.addColorStop(0, "#bbf7d0");
+        gradient.addColorStop(1, "#22c55e");
+      }
+
+      ctx.beginPath();
+      ctx.arc(u.x, u.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      // Little sword for soldiers
+      if (u.type === "soldier") {
+        ctx.save();
+        ctx.strokeStyle = "rgba(248,250,252,0.9)";
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(u.x + radius * 0.3, u.y - radius * 0.2);
+        ctx.lineTo(u.x + radius * 1.3, u.y - radius * 0.8);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Health bar
+      const hpRatio = u.hp / u.maxHp;
+      if (hpRatio < 1 && u.hp > 0) {
+        const barWidth = radius * 2;
+        const x = u.x - radius;
+        const y = u.y - radius - 5;
+        ctx.fillStyle = "rgba(15,23,42,0.8)";
+        ctx.fillRect(x, y, barWidth, HEALTH_BAR_HEIGHT);
+        ctx.fillStyle = hpRatio > 0.5 ? "#22c55e" : hpRatio > 0.25 ? "#eab308" : "#ef4444";
+        ctx.fillRect(x, y, barWidth * hpRatio, HEALTH_BAR_HEIGHT);
+      }
+
+      // Dead marker
+      if (u.hp <= 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.arc(u.x, u.y, radius * 0.7, 0, Math.PI * 2);
+        ctx.fillStyle = "#0f172a";
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function drawBarriers() {
+      ctx.save();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(148,163,184,0.8)";
+      ctx.shadowColor = "rgba(15,23,42,0.9)";
+      ctx.shadowBlur = 8;
+      for (const b of barriers) {
+        ctx.beginPath();
+        ctx.moveTo(b.x1, b.y1);
+        ctx.lineTo(b.x2, b.y2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function draw(dt) {
+      if (!trails) {
+        ctx.clearRect(0, 0, width, height);
+      } else {
+        ctx.fillStyle = "rgba(2,6,23,0.35)";
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      drawBarriers();
+
+      const aliveUnits = units.slice().sort((a, b) => {
+        if (a.type === b.type) return a.y - b.y;
+        return a.type === "zombie" ? -1 : 1;
+      });
+
+      for (const u of aliveUnits) drawUnit(u);
+
+      // Vignette
+      const g = ctx.createRadialGradient(
+        width / 2, height / 2, Math.min(width, height) * 0.1,
+        width / 2, height / 2, Math.min(width, height) * 0.7
+      );
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, "rgba(0,0,0,0.55)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    function loop(timestamp) {
+      const dt = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+
+      update(dt);
+      draw(dt);
+
+      requestAnimationFrame(loop);
+    }
+
+    // Initial start
+    initBattleFromUI();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
